@@ -1,0 +1,1475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ilocos Norte Route Finder</title>
+  <link href="https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:      #08090f;
+      --panel:   #0e0f1a;
+      --border:  #1c1d2e;
+      --accent:  #00e5ff;
+      --accent2: #ff6b35;
+      --green:   #00e676;
+      --text:    #e0e0e0;
+      --muted:   #4a4b60;
+      --font-ui: 'Syne', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-ui);
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── TOP BAR ─────────────────────────────────────────── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 18px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      z-index: 20;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      font-size: 17px;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+      white-space: nowrap;
+    }
+    .brand em { color: #fff; font-style: normal; font-weight: 400; }
+
+    .search-group {
+      display: flex;
+      gap: 6px;
+      flex: 1;
+      min-width: 260px;
+      align-items: center;
+    }
+
+    .search-wrap {
+      position: relative;
+      flex: 1;
+    }
+    .search-wrap .icon {
+      position: absolute;
+      left: 10px; top: 50%;
+      transform: translateY(-50%);
+      font-size: 13px;
+      pointer-events: none;
+    }
+    .search-wrap input {
+      width: 100%;
+      padding: 8px 12px 8px 30px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #13141f;
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-wrap input:focus { border-color: var(--accent); }
+    .search-wrap input::placeholder { color: var(--muted); }
+
+    .search-wrap .suggestions {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: #13141f;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      z-index: 100;
+      display: none;
+    }
+    .search-wrap .suggestions.open { display: block; }
+    .sugg-item {
+      padding: 9px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    .sugg-item:last-child { border-bottom: none; }
+    .sugg-item:hover { background: rgba(0,229,255,0.08); color: var(--accent); }
+    .sugg-item .sugg-name { font-weight: 600; }
+    .sugg-item .sugg-addr { font-size: 10px; color: var(--muted); margin-top: 2px; font-family: var(--font-mono); }
+
+    .arrow-sep {
+      font-size: 18px;
+      color: var(--accent2);
+      flex-shrink: 0;
+      font-weight: 700;
+    }
+
+    .go-btn {
+      padding: 8px 18px;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .go-btn:hover { background: #4df0ff; }
+    .go-btn:disabled { background: var(--muted); cursor: not-allowed; color: #666; }
+
+    .clear-btn {
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: var(--font-ui);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .clear-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+
+    /* ── MAP ─────────────────────────────────────────────── */
+    #map { flex: 1; width: 100%; position: relative; }
+    .maplibregl-ctrl-logo { display: none !important; }
+    .maplibregl-ctrl-attrib { font-size: 9px; opacity: 0.2; }
+    .maplibregl-ctrl-group { display: none !important; }
+
+    .ui-layer {
+      position: absolute; inset: 0;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    /* ── MODE HINT ───────────────────────────────────────── */
+    .mode-hint {
+      position: absolute;
+      top: 14px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(8,9,15,0.92);
+      border: 1px solid var(--accent);
+      border-radius: 20px;
+      padding: 8px 18px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      backdrop-filter: blur(12px);
+      pointer-events: auto;
+      white-space: nowrap;
+      letter-spacing: 0.3px;
+      box-shadow: 0 0 20px rgba(0,229,255,0.15);
+      transition: opacity 0.3s;
+    }
+    .mode-hint.hidden { opacity: 0; pointer-events: none; }
+
+    /* ── LOCATION PROMPT (mobile) ────────────────────────── */
+    .loc-prompt {
+      position: absolute;
+      bottom: 70px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(8,9,15,0.97);
+      border: 1px solid var(--accent);
+      border-radius: 16px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      pointer-events: auto;
+      z-index: 30;
+      box-shadow: 0 0 30px rgba(0,229,255,0.2);
+      backdrop-filter: blur(16px);
+      white-space: nowrap;
+      transition: opacity 0.4s, transform 0.4s;
+    }
+    .loc-prompt.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-50%) translateY(20px);
+    }
+    .loc-prompt-icon { font-size: 22px; }
+    .loc-prompt-text { flex: 1; }
+    .loc-prompt-text strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+    .loc-prompt-text span {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .loc-prompt-btn {
+      padding: 9px 16px;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #000;
+      border: none;
+      font-family: var(--font-ui);
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .loc-prompt-btn:hover { background: #4df0ff; }
+    .loc-prompt-dismiss {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+    .loc-prompt-dismiss:hover { border-color: var(--accent2); color: var(--accent2); }
+
+    /* ── ROUTE PANEL ─────────────────────────────────────── */
+    .route-panel {
+      position: absolute;
+      top: 14px; left: 14px;
+      width: 280px;
+      background: rgba(8,9,15,0.95);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      backdrop-filter: blur(16px);
+      pointer-events: auto;
+      overflow: hidden;
+      display: none;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+    }
+    .route-panel.show { display: block; }
+
+    .rp-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .rp-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .rp-from, .rp-to {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .rp-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      margin-top: 3px;
+      flex-shrink: 0;
+    }
+    .rp-dot.origin { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .rp-dot.dest   { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+    .rp-line {
+      width: 1px; height: 14px;
+      background: var(--border);
+      margin-left: 4.5px; margin-bottom: 2px;
+    }
+    .rp-name {
+      font-size: 12px; font-weight: 600; line-height: 1.3;
+      color: var(--text);
+    }
+    .rp-addr {
+      font-size: 10px; color: var(--muted);
+      font-family: var(--font-mono);
+      margin-top: 1px;
+    }
+
+    .rp-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      border-bottom: 1px solid var(--border);
+    }
+    .rp-stat {
+      padding: 12px 8px;
+      text-align: center;
+      border-right: 1px solid var(--border);
+    }
+    .rp-stat:last-child { border-right: none; }
+    .rp-stat .sv {
+      font-size: 16px; font-weight: 800;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      letter-spacing: -0.5px;
+    }
+    .rp-stat .sl {
+      font-size: 9px; color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-top: 2px;
+    }
+
+    .rp-steps {
+      max-height: 260px;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+    .rp-steps::-webkit-scrollbar { width: 3px; }
+    .rp-steps::-webkit-scrollbar-track { background: transparent; }
+    .rp-steps::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 7px 16px;
+      border-bottom: 1px solid rgba(28,29,46,0.5);
+      transition: background 0.1s;
+    }
+    .step-item:hover { background: rgba(0,229,255,0.04); }
+    .step-item:last-child { border-bottom: none; }
+    .step-icon {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      background: rgba(0,229,255,0.08);
+      border: 1px solid rgba(0,229,255,0.15);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+    .step-text { flex: 1; }
+    .step-instr {
+      font-size: 11px; font-weight: 600; line-height: 1.4;
+      color: var(--text);
+    }
+    .step-dist {
+      font-size: 10px; color: var(--muted);
+      font-family: var(--font-mono);
+      margin-top: 2px;
+    }
+
+    /* ── RIGHT CONTROLS ──────────────────────────────────── */
+    .right-controls {
+      position: absolute;
+      right: 14px; top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      pointer-events: auto;
+    }
+    .rc-btn {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: rgba(8,9,15,0.92);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 15px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: all 0.15s;
+      font-weight: 700;
+      font-family: var(--font-ui);
+    }
+    .rc-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .rc-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+    /* ── STYLE BAR ───────────────────────────────────────── */
+    .style-bar {
+      position: absolute;
+      bottom: 56px; left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 4px;
+      background: rgba(8,9,15,0.92);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 5px;
+      backdrop-filter: blur(10px);
+      pointer-events: auto;
+    }
+    .sbtn {
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 11px; font-weight: 700;
+      cursor: pointer; border: none;
+      background: transparent;
+      color: var(--muted);
+      transition: all 0.15s;
+      white-space: nowrap;
+      font-family: var(--font-ui);
+    }
+    .sbtn:hover { color: var(--text); }
+    .sbtn.active { background: var(--accent); color: #000; }
+
+    /* ── STATS BAR ───────────────────────────────────────── */
+    .stats-bar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      display: flex;
+      background: rgba(8,9,15,0.97);
+      border-top: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+      pointer-events: auto;
+    }
+    .stat { flex: 1; padding: 7px 4px; text-align: center; border-right: 1px solid var(--border); }
+    .stat:last-child { border-right: none; }
+    .stat .val { font-size: 12px; font-weight: 700; color: var(--accent); font-family: var(--font-mono); }
+    .stat .lbl { font-size: 9px; color: var(--muted); margin-top: 1px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* ── LOCATE BTN ──────────────────────────────────────── */
+    .locate-btn {
+      position: absolute;
+      bottom: 56px; right: 14px;
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: rgba(8,9,15,0.92);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 17px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: all 0.15s;
+      pointer-events: auto;
+    }
+    .locate-btn:hover { border-color: var(--accent); }
+    .locate-btn.located { background: var(--accent); color: #000; border-color: var(--accent); }
+    .locate-btn.loading { animation: locpulse 1s ease-in-out infinite; }
+    @keyframes locpulse {
+      0%, 100% { border-color: var(--accent); }
+      50%       { border-color: var(--muted);  }
+    }
+
+    /* ── TOAST ───────────────────────────────────────────── */
+    .toast {
+      position: absolute;
+      top: 60px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(8,9,15,0.97);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 16px;
+      font-size: 12px; color: var(--muted);
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      white-space: nowrap;
+      transition: opacity 0.4s;
+      z-index: 30;
+    }
+    .toast.hidden { opacity: 0; }
+
+    /* ── MARKERS ─────────────────────────────────────────── */
+    .marker-origin {
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--green);
+      border: 3px solid #fff;
+      box-shadow: 0 0 0 0 rgba(0,230,118,0.5);
+      animation: gpulse 2s ease-out infinite;
+    }
+    .marker-dest {
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--accent2);
+      border: 3px solid #fff;
+      box-shadow: 0 0 12px var(--accent2);
+    }
+    .marker-user {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 3px solid #fff;
+      box-shadow: 0 0 0 0 rgba(0,229,255,0.5);
+      animation: upulse 2s ease-out infinite;
+    }
+    @keyframes gpulse {
+      0%  { box-shadow: 0 0 0 0 rgba(0,230,118,0.5); }
+      70% { box-shadow: 0 0 0 12px rgba(0,230,118,0); }
+      100%{ box-shadow: 0 0 0 0 rgba(0,230,118,0); }
+    }
+    @keyframes upulse {
+      0%  { box-shadow: 0 0 0 0 rgba(0,229,255,0.5); }
+      70% { box-shadow: 0 0 0 12px rgba(0,229,255,0); }
+      100%{ box-shadow: 0 0 0 0 rgba(0,229,255,0); }
+    }
+
+    /* ── TOWN PICKER ─────────────────────────────────────── */
+    .towns-panel {
+      position: absolute;
+      bottom: 56px; left: 14px;
+      width: 200px;
+      background: rgba(8,9,15,0.95);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      backdrop-filter: blur(14px);
+      pointer-events: auto;
+      overflow: hidden;
+      box-shadow: 0 4px 30px rgba(0,0,0,0.5);
+    }
+    .towns-header {
+      padding: 10px 14px 6px;
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    .towns-list {
+      max-height: 240px;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .towns-list::-webkit-scrollbar { width: 3px; }
+    .towns-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .town-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      cursor: pointer;
+      border-bottom: 1px solid rgba(28,29,46,0.4);
+      transition: background 0.1s;
+    }
+    .town-item:last-child { border-bottom: none; }
+    .town-item:hover { background: rgba(0,229,255,0.07); color: var(--accent); }
+    .town-item .t-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+    .town-item:hover .t-dot { background: var(--accent); }
+    .town-item.capital .t-dot { background: var(--accent2); }
+    .town-item.capital { color: #ccc; }
+
+    .town-set-btns {
+      display: none;
+      gap: 4px;
+      margin-left: auto;
+    }
+    .town-item:hover .town-set-btns { display: flex; }
+    .tsb {
+      padding: 2px 6px;
+      border-radius: 5px;
+      font-size: 9px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+    }
+    .tsb.from { background: var(--green); color: #000; }
+    .tsb.to   { background: var(--accent2); color: #000; }
+
+    .oob-warning {
+      position: absolute;
+      top: 60px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,107,53,0.15);
+      border: 1px solid var(--accent2);
+      border-radius: 10px;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: var(--accent2);
+      font-weight: 600;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      white-space: nowrap;
+      z-index: 30;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .oob-warning.show { opacity: 1; }
+
+    .loading-overlay {
+      position: absolute; inset: 0;
+      background: rgba(8,9,15,0.7);
+      display: none;
+      flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 14px;
+      z-index: 50;
+      pointer-events: auto;
+    }
+    .loading-overlay.show { display: flex; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-txt { font-size: 13px; color: var(--accent); font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">🗺 <em>Ilocos Norte</em> Route</div>
+
+  <div class="search-group">
+    <div class="search-wrap" id="sw-origin">
+      <span class="icon">🟢</span>
+      <input type="text" id="origin-input" placeholder="From: e.g. Bangui"
+        oninput="handleInput('origin')" onkeydown="handleKey(event,'origin')" autocomplete="off" />
+      <div class="suggestions" id="origin-sugg"></div>
+    </div>
+
+    <div class="arrow-sep">→</div>
+
+    <div class="search-wrap" id="sw-dest">
+      <span class="icon">🔴</span>
+      <input type="text" id="dest-input" placeholder="To: e.g. Batac"
+        oninput="handleInput('dest')" onkeydown="handleKey(event,'dest')" autocomplete="off" />
+      <div class="suggestions" id="dest-sugg"></div>
+    </div>
+
+    <button class="go-btn" id="go-btn" onclick="computeRoute()" disabled>Get Route</button>
+    <button class="clear-btn" onclick="clearAll()">Clear</button>
+  </div>
+</div>
+
+<div id="map">
+  <div class="ui-layer">
+
+    <!-- Mode hint -->
+    <div class="mode-hint" id="mode-hint">🖱 Click anywhere on the map to set destination</div>
+
+    <!-- Route panel -->
+    <div class="route-panel" id="route-panel">
+      <div class="rp-header">
+        <div class="rp-title">Fastest Route</div>
+        <div class="rp-from">
+          <div class="rp-dot origin"></div>
+          <div>
+            <div class="rp-name" id="rp-from-name">—</div>
+            <div class="rp-addr" id="rp-from-addr"></div>
+          </div>
+        </div>
+        <div class="rp-line"></div>
+        <div class="rp-to">
+          <div class="rp-dot dest"></div>
+          <div>
+            <div class="rp-name" id="rp-to-name">—</div>
+            <div class="rp-addr" id="rp-to-addr"></div>
+          </div>
+        </div>
+      </div>
+      <div class="rp-stats">
+        <div class="rp-stat"><div class="sv" id="rp-dist">—</div><div class="sl">Distance</div></div>
+        <div class="rp-stat"><div class="sv" id="rp-dur">—</div><div class="sl">Est. Time</div></div>
+        <div class="rp-stat"><div class="sv" id="rp-steps-count">—</div><div class="sl">Turns</div></div>
+      </div>
+      <div class="rp-steps" id="rp-steps"></div>
+    </div>
+
+    <!-- Right controls -->
+    <div class="right-controls">
+      <div class="rc-btn" onclick="map.zoomIn()">+</div>
+      <div class="rc-btn" onclick="map.zoomOut()">−</div>
+      <div class="rc-btn" onclick="tiltMore()">⬆</div>
+      <div class="rc-btn" onclick="tiltLess()">⬇</div>
+      <div class="rc-btn" onclick="rotateLeft()">↺</div>
+      <div class="rc-btn" onclick="rotateRight()">↻</div>
+      <div class="rc-btn" id="follow-btn" onclick="toggleFollow()" title="Follow GPS">🎯</div>
+    </div>
+
+    <!-- Out-of-bounds warning -->
+    <div class="oob-warning" id="oob-warning">⚠️ Outside Ilocos Norte — please pick a location within the province</div>
+
+    <!-- Town quick-picker -->
+    <div class="towns-panel">
+      <div class="towns-header">📍 Ilocos Norte Towns</div>
+      <div class="towns-list" id="towns-list"></div>
+    </div>
+
+    <!-- Style switcher -->
+    <div class="style-bar">
+      <button class="sbtn active" id="s-dark"   onclick="setStyle('dark')">🌙 Dark</button>
+      <button class="sbtn"        id="s-nav"    onclick="setStyle('nav')">🚗 Nav</button>
+      <button class="sbtn"        id="s-street" onclick="setStyle('street')">🗺 Street</button>
+    </div>
+
+    <!-- Locate -->
+    <div class="locate-btn" id="locate-btn" onclick="locateMe()" title="My location">📍</div>
+
+    <!-- Stats -->
+    <div class="stats-bar">
+      <div class="stat"><div class="val" id="v-lat">—</div><div class="lbl">Lat</div></div>
+      <div class="stat"><div class="val" id="v-lng">—</div><div class="lbl">Lng</div></div>
+      <div class="stat"><div class="val" id="v-zoom">13</div><div class="lbl">Zoom</div></div>
+      <div class="stat"><div class="val" id="v-pitch">60°</div><div class="lbl">Tilt</div></div>
+      <div class="stat"><div class="val" id="v-bear">0°</div><div class="lbl">Bearing</div></div>
+    </div>
+
+    <!-- Location permission prompt (shown on mobile / when permission needed) -->
+    <div class="loc-prompt" id="loc-prompt">
+      <div class="loc-prompt-icon">📍</div>
+      <div class="loc-prompt-text">
+        <strong>Enable Your Location</strong>
+        <span>Tap to set your position as origin</span>
+      </div>
+      <button class="loc-prompt-btn" onclick="requestLocation()">Allow</button>
+      <button class="loc-prompt-dismiss" onclick="dismissLocPrompt()" title="Dismiss">✕</button>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+  </div>
+
+  <!-- Loading overlay -->
+  <div class="loading-overlay" id="loading">
+    <div class="spinner"></div>
+    <div class="loading-txt" id="loading-txt">Calculating fastest route...</div>
+  </div>
+</div>
+
+<script>
+// ─── Ilocos Norte bounds & towns ─────────────────────────────────────────
+var IN_BOUNDS = {
+  minLat: 17.97, maxLat: 18.67,
+  minLng: 120.30, maxLng: 120.84
+};
+
+var IN_TOWNS = [
+  { name: 'Laoag City',       lat: 18.1975, lng: 120.5936, capital: true  },
+  { name: 'Batac',            lat: 18.0553, lng: 120.5650, capital: false },
+  { name: 'Bangui',           lat: 18.5319, lng: 120.7586, capital: false },
+  { name: 'Pagudpud',         lat: 18.5629, lng: 120.7977, capital: false },
+  { name: 'Bacarra',          lat: 18.2533, lng: 120.6097, capital: false },
+  { name: 'Badoc',            lat: 17.9254, lng: 120.4739, capital: false },
+  { name: 'Burgos',           lat: 18.5100, lng: 120.6536, capital: false },
+  { name: 'Carasi',           lat: 18.0717, lng: 120.7228, capital: false },
+  { name: 'Currimao',         lat: 18.0167, lng: 120.4833, capital: false },
+  { name: 'Dingras',          lat: 18.1667, lng: 120.6997, capital: false },
+  { name: 'Dumalneg',         lat: 18.4167, lng: 120.7667, capital: false },
+  { name: 'Marcos',           lat: 18.1261, lng: 120.6664, capital: false },
+  { name: 'Nueva Era',        lat: 18.1500, lng: 120.7667, capital: false },
+  { name: 'Paoay',            lat: 18.0697, lng: 120.5233, capital: false },
+  { name: 'Pasuquin',         lat: 18.3383, lng: 120.6236, capital: false },
+  { name: 'Piddig',           lat: 18.2167, lng: 120.7167, capital: false },
+  { name: 'Pinili',           lat: 18.0000, lng: 120.5833, capital: false },
+  { name: 'San Nicolas',      lat: 18.1667, lng: 120.5833, capital: false },
+  { name: 'Sarrat',           lat: 18.1567, lng: 120.6414, capital: false },
+  { name: 'Solsona',          lat: 18.1167, lng: 120.7500, capital: false },
+  { name: 'Vintar',           lat: 18.2333, lng: 120.6667, capital: false },
+  { name: 'Adams',            lat: 18.4500, lng: 120.7333, capital: false },
+  { name: 'Banna (Espiritu)', lat: 18.0333, lng: 120.6167, capital: false },
+];
+
+function isInIlocosNorte(lat, lng) {
+  return lat >= IN_BOUNDS.minLat && lat <= IN_BOUNDS.maxLat &&
+         lng >= IN_BOUNDS.minLng && lng <= IN_BOUNDS.maxLng;
+}
+
+function showOOB() {
+  var el = document.getElementById('oob-warning');
+  el.classList.add('show');
+  clearTimeout(window._oobTimer);
+  window._oobTimer = setTimeout(function() { el.classList.remove('show'); }, 4000);
+}
+
+function buildTownList() {
+  var list = document.getElementById('towns-list');
+  list.innerHTML = IN_TOWNS.map(function(t, i) {
+    return '<div class="town-item' + (t.capital ? ' capital' : '') + '">' +
+           '<div class="t-dot"></div>' +
+           '<span onclick="flyToTown(' + i + ')">' + t.name + '</span>' +
+           '<div class="town-set-btns">' +
+           '<button class="tsb from" onclick="setTownAs(\'origin\',' + i + ')">FROM</button>' +
+           '<button class="tsb to"   onclick="setTownAs(\'dest\',' + i + ')">TO</button>' +
+           '</div></div>';
+  }).join('');
+}
+
+function flyToTown(i) {
+  var t = IN_TOWNS[i];
+  map.flyTo({ center: [t.lng, t.lat], zoom: 13, pitch: 55, bearing: -15, duration: 1200, essential: true });
+}
+
+function setTownAs(field, i) {
+  var t = IN_TOWNS[i];
+  var pt = { lng: t.lng, lat: t.lat, name: t.name + ', Ilocos Norte', addr: 'Ilocos Norte, Philippines' };
+  if (field === 'origin') {
+    originPt = pt;
+    document.getElementById('origin-input').value = t.name;
+  } else {
+    destPt = pt;
+    document.getElementById('dest-input').value = t.name;
+  }
+  placeMarker(field, t.lng, t.lat);
+  updateGoBtn();
+  updateModeHint();
+  if (originPt && destPt) computeRoute();
+}
+
+// ─── State ────────────────────────────────────────────────────────────────
+var originPt  = null;
+var destPt    = null;
+var userPt    = null;
+var markers   = {};
+var watchId   = null;
+var FOLLOW    = false;
+var currentStyle = 'dark';
+var suggestTimers = {};
+var locPermission = 'unknown'; // 'unknown' | 'granted' | 'denied'
+
+// ─── Map ─────────────────────────────────────────────────────────────────
+var mapStyles = {
+  dark:   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  nav:    'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+  street: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+};
+
+var IN_CENTER = [120.5936, 18.1975];
+
+var map = new maplibregl.Map({
+  container: 'map',
+  style: mapStyles.dark,
+  center: IN_CENTER,
+  zoom: 10,
+  pitch: 55,
+  bearing: -15,
+  antialias: true,
+  maxBounds: [
+    [120.20, 17.85],
+    [120.95, 18.75]
+  ]
+});
+
+map.on('load', function() {
+  add3DBuildings();
+  buildTownList();
+  addProvinceBorder();
+  updateModeHint();
+
+  // Check permission state first (Permissions API), then decide what to show
+  checkLocationPermission();
+});
+
+map.on('move', updateStats);
+
+map.on('click', function(e) {
+  var lng = e.lngLat.lng;
+  var lat = e.lngLat.lat;
+
+  if (!isInIlocosNorte(lat, lng)) {
+    showOOB();
+    return;
+  }
+
+  if (!originPt) {
+    setPointFromClick('origin', lng, lat);
+  } else if (!destPt) {
+    setPointFromClick('dest', lng, lat);
+  } else {
+    setPointFromClick('dest', lng, lat);
+  }
+});
+
+// ─── Location Permission Handling ─────────────────────────────────────────
+function checkLocationPermission() {
+  if (!navigator.geolocation) {
+    // No geolocation at all — hide the prompt
+    dismissLocPrompt();
+    return;
+  }
+
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: 'geolocation' }).then(function(result) {
+      locPermission = result.state; // 'granted' | 'denied' | 'prompt'
+
+      if (result.state === 'granted') {
+        // Already allowed — go ahead silently
+        dismissLocPrompt();
+        doAutoLocate();
+      } else if (result.state === 'denied') {
+        // Permanently denied — show message, hide prompt button
+        dismissLocPrompt();
+        showToast('📍 Location blocked. Enable it in your browser settings.', 5000);
+      } else {
+        // 'prompt' — show our friendly card so the user taps a button to trigger the native dialog
+        showLocPrompt();
+      }
+
+      // Listen for changes (e.g. user grants from settings)
+      result.onchange = function() {
+        locPermission = result.state;
+        if (result.state === 'granted') {
+          dismissLocPrompt();
+          doAutoLocate();
+        }
+      };
+    }).catch(function() {
+      // Permissions API not supported — show prompt card to be safe
+      showLocPrompt();
+    });
+  } else {
+    // No Permissions API (older browser/Android WebView) — show prompt card
+    showLocPrompt();
+  }
+}
+
+function showLocPrompt() {
+  document.getElementById('loc-prompt').classList.remove('hidden');
+}
+
+function dismissLocPrompt() {
+  document.getElementById('loc-prompt').classList.add('hidden');
+}
+
+// Called when user taps the "Allow" button in our prompt card
+function requestLocation() {
+  dismissLocPrompt();
+  var btn = document.getElementById('locate-btn');
+  btn.classList.add('loading');
+  doAutoLocate();
+}
+
+function doAutoLocate() {
+  if (!navigator.geolocation) return;
+
+  var btn = document.getElementById('locate-btn');
+
+  navigator.geolocation.getCurrentPosition(
+    function(pos) {
+      btn.classList.remove('loading');
+      var lat = pos.coords.latitude;
+      var lng = pos.coords.longitude;
+
+      if (isInIlocosNorte(lat, lng)) {
+        userPt = { lng, lat };
+        placeMarker('user', lng, lat);
+        map.flyTo({ center: [lng, lat], zoom: 13, pitch: 55, duration: 1500, essential: true });
+        btn.classList.add('located');
+
+        if (!originPt) {
+          reverseGeocode(lat, lng, function(name, addr) {
+            originPt = { lng, lat, name, addr };
+            document.getElementById('origin-input').value = name;
+            updateGoBtn();
+            updateModeHint();
+          });
+        }
+      } else {
+        userPt = { lng, lat };
+        showToast('📍 Your GPS is outside Ilocos Norte — showing province view', 3500);
+      }
+
+      // Start watching after initial fix
+      startWatching();
+    },
+    function(err) {
+      btn.classList.remove('loading');
+      if (err.code === err.PERMISSION_DENIED) {
+        showToast('❌ Location access denied. Enable it in browser settings.', 5000);
+      } else if (err.code === err.POSITION_UNAVAILABLE) {
+        showToast('❌ Location unavailable. Check GPS signal.', 4000);
+      } else if (err.code === err.TIMEOUT) {
+        showToast('⏱ Location request timed out. Try again.', 4000);
+      } else {
+        showToast('❌ Could not get location.', 3000);
+      }
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+}
+
+function startWatching() {
+  if (watchId !== null) return; // already watching
+  watchId = navigator.geolocation.watchPosition(
+    function(p) {
+      userPt = { lng: p.coords.longitude, lat: p.coords.latitude };
+      if (isInIlocosNorte(userPt.lat, userPt.lng)) {
+        placeMarker('user', userPt.lng, userPt.lat);
+        if (FOLLOW) map.easeTo({ center: [userPt.lng, userPt.lat], duration: 800, essential: true });
+      }
+    },
+    null,
+    { enableHighAccuracy: true, maximumAge: 2000 }
+  );
+}
+
+// Tapping the 📍 button in the corner
+function locateMe() {
+  if (locPermission === 'denied') {
+    showToast('❌ Location blocked. Enable it in your browser/phone settings.', 5000);
+    return;
+  }
+
+  if (userPt && isInIlocosNorte(userPt.lat, userPt.lng)) {
+    map.flyTo({ center: [userPt.lng, userPt.lat], zoom: 15, pitch: 55, duration: 1200, essential: true });
+  } else {
+    // No fix yet — trigger the request (works as a user gesture on mobile)
+    requestLocation();
+  }
+}
+
+function toggleFollow() {
+  FOLLOW = !FOLLOW;
+  var btn = document.getElementById('follow-btn');
+  FOLLOW ? btn.classList.add('active') : btn.classList.remove('active');
+  showToast(FOLLOW ? '🎯 Following your GPS' : '👆 Manual mode', 2000);
+}
+
+// ─── Province border ──────────────────────────────────────────────────────
+function addProvinceBorder() {
+  if (map.getLayer('in-border')) return;
+  map.addSource('in-box', {
+    type: 'geojson',
+    data: {
+      type: 'Feature',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[
+          [120.30, 17.97],[120.84, 17.97],
+          [120.84, 18.67],[120.30, 18.67],
+          [120.30, 17.97]
+        ]]
+      }
+    }
+  });
+  map.addLayer({
+    id: 'in-border',
+    type: 'line',
+    source: 'in-box',
+    paint: {
+      'line-color': '#00e5ff',
+      'line-width': 2,
+      'line-opacity': 0.25,
+      'line-dasharray': [4, 4]
+    }
+  });
+}
+
+// ─── Click-to-set ─────────────────────────────────────────────────────────
+function setPointFromClick(field, lng, lat) {
+  showLoading('Resolving location...');
+  reverseGeocode(lat, lng, function(name, addr) {
+    hideLoading();
+    var pt = { lng, lat, name, addr };
+    if (field === 'origin') {
+      originPt = pt;
+      document.getElementById('origin-input').value = name;
+    } else {
+      destPt = pt;
+      document.getElementById('dest-input').value = name;
+    }
+    placeMarker(field, lng, lat);
+    updateGoBtn();
+    updateModeHint();
+    if (originPt && destPt) computeRoute();
+  });
+}
+
+// ─── Autocomplete ─────────────────────────────────────────────────────────
+function handleInput(field) {
+  var val = document.getElementById(field + '-input').value.trim();
+  clearTimeout(suggestTimers[field]);
+  if (val.length < 2) { closeSugg(field); return; }
+  suggestTimers[field] = setTimeout(function() { fetchSuggestions(field, val); }, 300);
+}
+
+function fetchSuggestions(field, q) {
+  var local = IN_TOWNS
+    .filter(t => t.name.toLowerCase().includes(q.toLowerCase()))
+    .map(t => ({ name: t.name + ', Ilocos Norte', addr: 'Ilocos Norte, Philippines', lat: t.lat, lng: t.lng }));
+
+  fetch('https://nominatim.openstreetmap.org/search?format=json' +
+        '&q=' + encodeURIComponent(q + ' Ilocos Norte') +
+        '&countrycodes=ph&limit=5&addressdetails=1' +
+        '&viewbox=120.20,17.85,120.95,18.75&bounded=1')
+    .then(r => r.json())
+    .then(function(data) {
+      var remote = data
+        .filter(d => {
+          var lat = parseFloat(d.lat), lng = parseFloat(d.lon);
+          return isInIlocosNorte(lat, lng);
+        })
+        .map(d => ({
+          name: d.display_name.split(',')[0].trim(),
+          addr: d.display_name.split(',').slice(1,3).join(',').trim(),
+          lat: parseFloat(d.lat), lng: parseFloat(d.lon)
+        }));
+
+      var seen = new Set(local.map(l => l.name.toLowerCase()));
+      remote.forEach(function(r) {
+        if (!seen.has(r.name.toLowerCase())) { local.push(r); seen.add(r.name.toLowerCase()); }
+      });
+      renderSuggestions(field, local.slice(0, 6));
+    })
+    .catch(function() { renderSuggestions(field, local); });
+}
+
+function renderSuggestions(field, items) {
+  var box = document.getElementById(field + '-sugg');
+  if (!items.length) { closeSugg(field); return; }
+  box.innerHTML = items.map(function(it, i) {
+    return '<div class="sugg-item" onclick="pickSugg(\'' + field + '\',' + i + ')">' +
+           '<div class="sugg-name">' + escHtml(it.name) + '</div>' +
+           (it.addr ? '<div class="sugg-addr">' + escHtml(it.addr) + '</div>' : '') +
+           '</div>';
+  }).join('');
+  box._items = items;
+  box.classList.add('open');
+}
+
+function pickSugg(field, i) {
+  var box   = document.getElementById(field + '-sugg');
+  var items = box._items;
+  var item  = items[i];
+  document.getElementById(field + '-input').value = item.name.replace(', Ilocos Norte','');
+  closeSugg(field);
+
+  var pt = { lng: item.lng, lat: item.lat, name: item.name, addr: item.addr };
+  if (field === 'origin') originPt = pt; else destPt = pt;
+  placeMarker(field, item.lng, item.lat);
+  map.flyTo({ center: [item.lng, item.lat], zoom: 13, pitch: 55, duration: 1200, essential: true });
+  updateGoBtn(); updateModeHint();
+  if (originPt && destPt) computeRoute();
+}
+
+function handleKey(e, field) {
+  if (e.key === 'Enter') {
+    closeSugg(field);
+    var val = document.getElementById(field + '-input').value.trim();
+    if (!val) return;
+
+    var local = IN_TOWNS.find(t => t.name.toLowerCase().includes(val.toLowerCase()));
+    if (local) {
+      var pt = { lng: local.lng, lat: local.lat, name: local.name + ', Ilocos Norte', addr: 'Ilocos Norte, Philippines' };
+      if (field === 'origin') originPt = pt; else destPt = pt;
+      document.getElementById(field + '-input').value = local.name;
+      placeMarker(field, local.lng, local.lat);
+      map.flyTo({ center: [local.lng, local.lat], zoom: 13, pitch: 55, duration: 1200, essential: true });
+      updateGoBtn(); updateModeHint();
+      if (originPt && destPt) computeRoute();
+      return;
+    }
+
+    fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(val + ' Ilocos Norte') +
+          '&countrycodes=ph&limit=1&viewbox=120.20,17.85,120.95,18.75&bounded=1')
+      .then(r => r.json())
+      .then(function(data) {
+        if (data && data[0]) {
+          var lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon);
+          if (!isInIlocosNorte(lat, lng)) { showOOB(); return; }
+          var name = data[0].display_name.split(',').slice(0,2).join(',').trim();
+          var addr = data[0].display_name.split(',').slice(2,4).join(',').trim();
+          var pt = { lng, lat, name, addr };
+          if (field === 'origin') originPt = pt; else destPt = pt;
+          document.getElementById(field + '-input').value = name;
+          placeMarker(field, lng, lat);
+          map.flyTo({ center: [lng, lat], zoom: 13, pitch: 55, duration: 1200, essential: true });
+          updateGoBtn(); updateModeHint();
+          if (originPt && destPt) computeRoute();
+        } else {
+          showToast('❌ Not found in Ilocos Norte', 3000);
+        }
+      });
+  }
+  if (e.key === 'Escape') closeSugg(field);
+}
+
+function closeSugg(field) {
+  document.getElementById(field + '-sugg').classList.remove('open');
+}
+
+document.addEventListener('click', function(e) {
+  ['origin','dest'].forEach(function(f) {
+    var sw = document.getElementById('sw-' + f);
+    if (!sw.contains(e.target)) closeSugg(f);
+  });
+});
+
+// ─── Routing ──────────────────────────────────────────────────────────────
+function computeRoute() {
+  if (!originPt || !destPt) {
+    showToast('⚠️ Set both origin and destination first', 3000);
+    return;
+  }
+
+  showLoading('Calculating fastest route...');
+
+  var url = 'https://router.project-osrm.org/route/v1/driving/' +
+            originPt.lng + ',' + originPt.lat + ';' +
+            destPt.lng   + ',' + destPt.lat +
+            '?overview=full&geometries=geojson&steps=true&annotations=false';
+
+  fetch(url)
+    .then(r => r.json())
+    .then(function(data) {
+      hideLoading();
+      if (!data.routes || !data.routes.length) {
+        showToast('❌ No route found between these points', 4000);
+        return;
+      }
+      var route = data.routes[0];
+      drawRoute(route.geometry);
+      renderRoutePanel(route);
+      fitRouteBounds(route.geometry.coordinates);
+      showToast('✅ Fastest route found!', 2500);
+    })
+    .catch(function() {
+      hideLoading();
+      showToast('❌ Routing service error. Check connection.', 4000);
+    });
+}
+
+function drawRoute(geometry) {
+  ['route-line', 'route-glow', 'route-casing', 'route-animated'].forEach(function(id) {
+    if (map.getLayer(id)) map.removeLayer(id);
+  });
+  if (map.getSource('route')) map.removeSource('route');
+
+  map.addSource('route', {
+    type: 'geojson',
+    data: { type: 'Feature', geometry: geometry }
+  });
+
+  map.addLayer({
+    id: 'route-glow', type: 'line', source: 'route',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#00e5ff', 'line-width': 18, 'line-opacity': 0.12, 'line-blur': 6 }
+  });
+
+  map.addLayer({
+    id: 'route-casing', type: 'line', source: 'route',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#003344', 'line-width': 10 }
+  });
+
+  map.addLayer({
+    id: 'route-line', type: 'line', source: 'route',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: {
+      'line-color': '#00e5ff',
+      'line-width': 5,
+      'line-gradient': ['interpolate',['linear'],['line-progress'],
+        0,'#00e676', 0.5,'#00e5ff', 1,'#ff6b35']
+    }
+  });
+}
+
+function renderRoutePanel(route) {
+  var dist = route.distance;
+  var dur  = route.duration;
+
+  var distStr = dist >= 1000 ? (dist/1000).toFixed(1) + ' km' : Math.round(dist) + ' m';
+  var durMin  = Math.round(dur / 60);
+  var durStr  = durMin >= 60 ? Math.floor(durMin/60) + 'h ' + (durMin%60) + 'm' : durMin + ' min';
+
+  document.getElementById('rp-from-name').textContent = originPt.name;
+  document.getElementById('rp-from-addr').textContent = originPt.addr || '';
+  document.getElementById('rp-to-name').textContent   = destPt.name;
+  document.getElementById('rp-to-addr').textContent   = destPt.addr || '';
+  document.getElementById('rp-dist').textContent = distStr;
+  document.getElementById('rp-dur').textContent  = durStr;
+
+  var allSteps = [];
+  (route.legs || []).forEach(function(leg) {
+    (leg.steps || []).forEach(function(step) { allSteps.push(step); });
+  });
+
+  document.getElementById('rp-steps-count').textContent = allSteps.length;
+
+  var stepsHtml = allSteps.map(function(step) {
+    var icon  = maneuverIcon(step.maneuver ? step.maneuver.type : '');
+    var instr = step.maneuver && step.maneuver.instruction ? step.maneuver.instruction : (step.name || 'Continue');
+    var d = step.distance >= 1000 ? (step.distance/1000).toFixed(1) + ' km' : Math.round(step.distance) + ' m';
+    return '<div class="step-item">' +
+           '<div class="step-icon">' + icon + '</div>' +
+           '<div class="step-text">' +
+           '<div class="step-instr">' + escHtml(instr) + '</div>' +
+           '<div class="step-dist">' + d + '</div>' +
+           '</div></div>';
+  }).join('');
+
+  document.getElementById('rp-steps').innerHTML = stepsHtml;
+  document.getElementById('route-panel').classList.add('show');
+}
+
+function maneuverIcon(type) {
+  var icons = {
+    'turn':'↩','new name':'➡','depart':'🟢','arrive':'🏁','merge':'⤵',
+    'on ramp':'↗','off ramp':'↘','fork':'⑂','end of road':'⬛',
+    'continue':'⬆','roundabout':'🔄','rotary':'🔄','roundabout turn':'↺',
+    'notification':'ℹ','exit roundabout':'↗','exit rotary':'↗','use lane':'↑'
+  };
+  return icons[type] || '⬆';
+}
+
+function fitRouteBounds(coords) {
+  var lngs = coords.map(c => c[0]);
+  var lats  = coords.map(c => c[1]);
+  map.fitBounds(
+    [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+    { padding: { top: 80, bottom: 80, left: 320, right: 80 }, pitch: 55, duration: 1800, essential: true }
+  );
+}
+
+// ─── Markers ──────────────────────────────────────────────────────────────
+function placeMarker(type, lng, lat) {
+  if (markers[type]) markers[type].remove();
+  var el = document.createElement('div');
+  el.className = type === 'origin' ? 'marker-origin' : type === 'dest' ? 'marker-dest' : 'marker-user';
+
+  var popup = new maplibregl.Popup({ offset: 16 })
+    .setHTML('<strong style="color:' +
+      (type==='origin'?'#00e676':type==='dest'?'#ff6b35':'#00e5ff') + '">' +
+      (type==='origin' ? '🟢 Origin' : type==='dest' ? '🔴 Destination' : '📍 You') +
+      '</strong>');
+
+  markers[type] = new maplibregl.Marker({ element: el, anchor: 'center' })
+    .setLngLat([lng, lat])
+    .setPopup(popup)
+    .addTo(map);
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────
+function reverseGeocode(lat, lng, cb) {
+  fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng)
+    .then(r => r.json())
+    .then(function(d) {
+      var parts = d.display_name ? d.display_name.split(',') : [];
+      var name = parts.slice(0,2).join(',').trim() || 'Selected Point';
+      var addr = parts.slice(2,4).join(',').trim() || '';
+      cb(name, addr);
+    })
+    .catch(function() { cb('Selected Point', ''); });
+}
+
+function clearAll() {
+  originPt = null; destPt = null;
+  document.getElementById('origin-input').value = '';
+  document.getElementById('dest-input').value = '';
+  ['origin','dest'].forEach(function(t) {
+    if (markers[t]) { markers[t].remove(); delete markers[t]; }
+  });
+  ['route-line','route-glow','route-casing','route-animated'].forEach(function(id) {
+    if (map.getLayer(id)) map.removeLayer(id);
+  });
+  if (map.getSource('route')) map.removeSource('route');
+  document.getElementById('route-panel').classList.remove('show');
+  updateGoBtn();
+  updateModeHint();
+  showToast('🗑 Cleared', 2000);
+}
+
+function updateGoBtn() {
+  document.getElementById('go-btn').disabled = !(originPt && destPt);
+}
+
+function updateModeHint() {
+  var hint = document.getElementById('mode-hint');
+  if (!originPt) {
+    hint.textContent = '🖱 Click map to set origin, or type above';
+    hint.classList.remove('hidden');
+  } else if (!destPt) {
+    hint.textContent = '🖱 Click anywhere to set destination';
+    hint.classList.remove('hidden');
+  } else {
+    hint.classList.add('hidden');
+  }
+}
+
+function showLoading(txt) {
+  document.getElementById('loading-txt').textContent = txt || 'Loading...';
+  document.getElementById('loading').classList.add('show');
+}
+function hideLoading() {
+  document.getElementById('loading').classList.remove('show');
+}
+
+function showToast(msg, dur) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(window._tt);
+  window._tt = setTimeout(function() { t.classList.add('hidden'); }, dur || 3000);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── Map controls ─────────────────────────────────────────────────────────
+function tiltMore()    { map.easeTo({ pitch: Math.min(map.getPitch()+10, 85), duration: 300 }); }
+function tiltLess()    { map.easeTo({ pitch: Math.max(map.getPitch()-10, 0),  duration: 300 }); }
+function rotateLeft()  { map.easeTo({ bearing: map.getBearing() - 30, duration: 400 }); }
+function rotateRight() { map.easeTo({ bearing: map.getBearing() + 30, duration: 400 }); }
+
+function setStyle(id) {
+  currentStyle = id;
+  document.querySelectorAll('.sbtn').forEach(b => b.classList.remove('active'));
+  document.getElementById('s-' + id).classList.add('active');
+  map.setStyle(mapStyles[id]);
+  map.once('style.load', function() { add3DBuildings(); addProvinceBorder(); });
+}
+
+function add3DBuildings() {
+  if (map.getLayer('3d-buildings')) map.removeLayer('3d-buildings');
+  var layers = map.getStyle().layers;
+  var firstSymbol;
+  for (var i = 0; i < layers.length; i++) {
+    if (layers[i].type === 'symbol') { firstSymbol = layers[i].id; break; }
+  }
+  var srcs = Object.keys(map.getStyle().sources);
+  var bsrc = srcs.find(s => s.includes('carto') || s.includes('openmaptiles') || s.includes('tiles'));
+  if (bsrc) {
+    try {
+      map.addLayer({
+        id: '3d-buildings', source: bsrc, 'source-layer': 'building',
+        type: 'fill-extrusion', minzoom: 13,
+        paint: {
+          'fill-extrusion-color': ['interpolate',['linear'],
+            ['coalesce',['get','render_height'],['get','height'],10],
+            0,'#1a1b2e', 60,'#243060', 200,'#2a4080', 300,'#00e5ff'],
+          'fill-extrusion-height': ['interpolate',['linear'],['zoom'],13,0,13.5,
+            ['coalesce',['get','render_height'],['get','height'],10]],
+          'fill-extrusion-base': ['interpolate',['linear'],['zoom'],13,0,13.5,
+            ['coalesce',['get','render_min_height'],['get','min_height'],0]],
+          'fill-extrusion-opacity': 0.88
+        }
+      }, firstSymbol);
+    } catch(e) {}
+  }
+}
+
+function updateStats() {
+  var c = map.getCenter();
+  document.getElementById('v-lat').textContent   = c.lat.toFixed(4) + '°';
+  document.getElementById('v-lng').textContent   = c.lng.toFixed(4) + '°';
+  document.getElementById('v-zoom').textContent  = map.getZoom().toFixed(1);
+  document.getElementById('v-pitch').textContent = Math.round(map.getPitch()) + '°';
+  document.getElementById('v-bear').textContent  = Math.round(map.getBearing()) + '°';
+}
+</script>
+</body>
+</html>
